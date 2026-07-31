@@ -32,6 +32,20 @@ on:
         required: false
         type: string
         default: .
+      image_name:
+        description: >-
+          Nombre de la imagen bajo ghcr.io/<owner>/. Por defecto, el del repo.
+          Sirve para repos que publican más de una imagen (p. ej. caudal-backup).
+        required: false
+        type: string
+        default: ''
+      bump_infra:
+        description: >-
+          Si es false, solo construye y publica la imagen sin tocar infra.
+          Úsalo en las imágenes secundarias de un repo para no duplicar el commit.
+        required: false
+        type: boolean
+        default: true
       infra_repo:
         description: Repo que guarda el estado desplegado
         required: false
@@ -70,14 +84,20 @@ jobs:
 
       - name: Calcular referencias de imagen
         id: meta
+        env:
+          IMAGE_NAME: ${{ inputs.image_name }}
         run: |
           set -euo pipefail
-          # ghcr exige el nombre del repositorio en minúsculas.
-          repo_lc=$(echo "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')
+          # ghcr exige owner y nombre de imagen en minúsculas.
+          owner_lc=$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')
+          if [ -n "$IMAGE_NAME" ]; then
+            name_lc=$(echo "$IMAGE_NAME" | tr '[:upper:]' '[:lower:]')
+          else
+            name_lc=$(echo "${GITHUB_REPOSITORY#*/}" | tr '[:upper:]' '[:lower:]')
+          fi
           {
-            echo "repo_lc=${repo_lc}"
             echo "sha_short=${GITHUB_SHA::7}"
-            echo "image=ghcr.io/${repo_lc}"
+            echo "image=ghcr.io/${owner_lc}/${name_lc}"
           } >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-buildx-action@v3
@@ -102,6 +122,7 @@ jobs:
 
   bump:
     needs: build
+    if: ${{ inputs.bump_infra }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -133,7 +154,7 @@ jobs:
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          branch="${GITHUB_REF_NAME_INFRA:-main}"
+          branch=main
 
           # Reescribimos el fichero en cada intento en lugar de rebasar un commit
           # ya hecho: así dos apps que publican a la vez nunca entran en conflicto.

@@ -32,7 +32,34 @@ jobs:
 | `app_name` | sí | — | Carpeta del stack: `infra/stacks/<app_name>` |
 | `dockerfile` | no | `Dockerfile` | Ruta al Dockerfile |
 | `context` | no | `.` | Contexto de build |
+| `image_name` | no | nombre del repo | Nombre bajo `ghcr.io/avesperinas/` |
+| `bump_infra` | no | `true` | Si `false`, solo construye: no commitea en `infra` |
 | `infra_repo` | no | `avesperinas/infra` | Repo de estado desplegado |
+
+### Repos con más de una imagen
+
+`image_name` + `bump_infra` permiten publicar varias imágenes desde el mismo tag.
+Solo una de las llamadas debe escribir en `infra`:
+
+```yaml
+jobs:
+  app:
+    uses: avesperinas/workflows/.github/workflows/release.yml@main
+    with: { app_name: caudal }
+    secrets: { infra_token: ${{ secrets.INFRA_TOKEN }} }
+
+  backup:
+    uses: avesperinas/workflows/.github/workflows/release.yml@main
+    with:
+      app_name: caudal
+      image_name: caudal-backup
+      context: scripts/backup
+      dockerfile: scripts/backup/Dockerfile
+      bump_infra: false          # el job `app` ya publica la versión
+    secrets: { infra_token: ${{ secrets.INFRA_TOKEN }} }
+```
+
+Ambas imágenes comparten el mismo `IMAGE_TAG`, así que el stack las despliega juntas.
 
 ### Secrets
 
