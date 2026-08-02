@@ -1,0 +1,13 @@
+name: ping
+# Reusable minimo, solo para diagnosticar problemas de resolucion.
+on:
+  workflow_call:
+    inputs:
+      app_name:
+        required: true
+        type: string
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "ping desde ${{ inputs.app_name }}"
