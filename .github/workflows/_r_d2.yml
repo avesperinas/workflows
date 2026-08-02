@@ -1,0 +1,32 @@
+name: r-d2
+on:
+  workflow_call:
+    inputs:
+      app_name:
+        required: true
+        type: string
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Calcular referencias de imagen
+        id: meta
+        env:
+          IMAGE_NAME: ${{ inputs.image_name }}
+        run: |
+          set -euo pipefail
+          # ghcr exige owner y nombre de imagen en minúsculas.
+          owner_lc=$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')
+          if [ -n "$IMAGE_NAME" ]; then
+            name_lc=$(echo "$IMAGE_NAME" | tr '[:upper:]' '[:lower:]')
+          else
+            name_lc=$(echo "${GITHUB_REPOSITORY#*/}" | tr '[:upper:]' '[:lower:]')
+          fi
+          {
+            echo "sha_short=${GITHUB_SHA::7}"
+            echo "image=ghcr.io/${owner_lc}/${name_lc}"
+          } >> "$GITHUB_OUTPUT"
+
