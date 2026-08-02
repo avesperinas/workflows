@@ -9,6 +9,9 @@ name: release
 #   on: { push: { tags: ['v*'] } }
 #   jobs:
 #     release:
+#       permissions:          # obligatorio: sin esto el run ni arranca
+#         contents: read
+#         packages: write
 #       uses: avesperinas/workflows/.github/workflows/release.yml@main
 #       with:
 #         app_name: caudal
@@ -68,9 +71,14 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Validar el tag
+        # El nombre del tag llega por `env`, nunca interpolado en el script:
+        # GitHub sustituye ${{ }} ANTES de invocar al shell, asi que un tag con
+        # comillas podria inyectar comandos arbitrarios en el runner.
+        env:
+          TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          tag='${{ github.ref_name }}'
+          tag="$TAG"
           # `latest` está prohibido por diseño: el estado desplegado debe ser
           # siempre una referencia inmutable.
           if [ "$tag" = "latest" ]; then
@@ -140,13 +148,14 @@ jobs:
           APP: ${{ inputs.app_name }}
           TAG: ${{ github.ref_name }}
           SRC_REPO: ${{ github.repository }}
+          INFRA_REPO: ${{ inputs.infra_repo }}
         run: |
           set -euo pipefail
           cd infra
 
           stack="stacks/${APP}"
           if [ ! -d "$stack" ]; then
-            echo "::error::El stack '${stack}' no existe en ${{ inputs.infra_repo }}."
+            echo "::error::El stack '${stack}' no existe en ${INFRA_REPO}."
             echo "::error::Créalo (docker-compose.yml + versions.env) antes de publicar un tag."
             exit 1
           fi
@@ -174,7 +183,7 @@ jobs:
               -m "Origen: ${SRC_REPO}@${TAG}"
 
             if git push --quiet origin "HEAD:${branch}"; then
-              echo "✅ ${APP} -> ${TAG} publicado en ${{ inputs.infra_repo }}"
+              echo "✅ ${APP} -> ${TAG} publicado en ${INFRA_REPO}"
               exit 0
             fi
 
