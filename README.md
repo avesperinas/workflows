@@ -18,12 +18,25 @@ name: release
 on: { push: { tags: ['v*'] } }
 jobs:
   release:
+    permissions:            # imprescindible, ver más abajo
+      contents: read
+      packages: write
     uses: avesperinas/workflows/.github/workflows/release.yml@main
     with:
       app_name: caudal
     secrets:
       infra_token: ${{ secrets.INFRA_TOKEN }}
 ```
+
+> **El bloque `permissions` del llamador no es opcional.** Un workflow
+> reutilizable no puede pedir más permisos de los que le concede quien lo llama,
+> y el permiso por defecto del `GITHUB_TOKEN` en estos repos es *read*. Si se
+> omite, el run falla con `startup_failure` **antes de ejecutar ningún job**, sin
+> logs ni anotaciones que expliquen por qué.
+>
+> La alternativa sería subir el permiso por defecto de la cuenta entera a
+> *read/write*; se prefiere concederlo por repo para no ampliar el token de todo
+> lo demás.
 
 ### Inputs
 
@@ -44,11 +57,17 @@ Solo una de las llamadas debe escribir en `infra`:
 ```yaml
 jobs:
   app:
+    permissions:
+      contents: read
+      packages: write
     uses: avesperinas/workflows/.github/workflows/release.yml@main
     with: { app_name: caudal }
     secrets: { infra_token: ${{ secrets.INFRA_TOKEN }} }
 
   backup:
+    permissions:
+      contents: read
+      packages: write
     uses: avesperinas/workflows/.github/workflows/release.yml@main
     with:
       app_name: caudal
