@@ -42,6 +42,15 @@ on:
         required: false
         type: string
         default: ''
+      version_var:
+        description: >-
+          Variable de stacks/<app_name>/versions.env que anuncia esta versión.
+          Por defecto IMAGE_TAG, que es la del stack entero. Un repo que publica
+          varios trenes (una plataforma y sus apps) le da a cada app la suya,
+          p. ej. REDIN_TAG, y el resto de líneas del fichero se conservan.
+        required: false
+        type: string
+        default: IMAGE_TAG
       bump_infra:
         description: >-
           Si es false, solo construye y publica la imagen sin tocar infra.
@@ -67,6 +76,7 @@ jobs:
       packages: write
     outputs:
       image: ${{ steps.meta.outputs.image }}
+      version: ${{ steps.meta.outputs.version }}
     steps:
       - uses: actions/checkout@v4
 
@@ -85,9 +95,12 @@ jobs:
             echo "::error::'latest' no se puede usar como tag de release."
             exit 1
           fi
+          # `vX.Y.Z` para el stack entero, y `<componente>/vX.Y.Z` para un tren
+          # propio dentro de un repo que publica varios.
           case "$tag" in
             v[0-9]*) ;;
-            *) echo "::error::El tag '$tag' no sigue el formato vX.Y.Z"; exit 1 ;;
+            */v[0-9]*) ;;
+            *) echo "::error::El tag '$tag' no sigue el formato vX.Y.Z ni <componente>/vX.Y.Z"; exit 1 ;;
           esac
 
       - name: Calcular referencias de imagen
@@ -103,9 +116,13 @@ jobs:
           else
             name_lc=$(echo "${GITHUB_REPOSITORY#*/}" | tr '[:upper:]' '[:lower:]')
           fi
+          # Un tag de componente (`redin/v1.2.0`) no vale como tag de imagen: docker
+          # no admite '/'. La imagen lleva la versión, que es lo que hay detrás de la
+          # última barra, y para un tag normal es el tag entero.
           {
             echo "sha_short=${GITHUB_SHA::7}"
             echo "image=ghcr.io/${owner_lc}/${name_lc}"
+            echo "version=${GITHUB_REF_NAME##*/}"
           } >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-buildx-action@v3
@@ -122,7 +139,7 @@ jobs:
           file: ${{ inputs.dockerfile }}
           push: true
           tags: |
-            ${{ steps.meta.outputs.image }}:${{ github.ref_name }}
+            ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.version }}
             ${{ steps.meta.outputs.image }}:sha-${{ steps.meta.outputs.sha_short }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
@@ -146,7 +163,8 @@ jobs:
       - name: Publicar la versión en infra
         env:
           APP: ${{ inputs.app_name }}
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ needs.build.outputs.version }}
+          VAR: ${{ inputs.version_var }}
           SRC_REPO: ${{ github.repository }}
           INFRA_REPO: ${{ inputs.infra_repo }}
         run: |
@@ -171,19 +189,31 @@ jobs:
             git fetch --quiet origin "$branch"
             git reset --quiet --hard "origin/${branch}"
 
-            printf 'IMAGE_TAG=%s\n' "$TAG" > "${stack}/versions.env"
-            git add "${stack}/versions.env"
+            # Solo la línea de esta variable: un repo con varios trenes escribe
+            # REDIN_TAG sin tocar IMAGE_TAG ni las demás.
+            file="${stack}/versions.env"
+            touch "$file"
+            if grep -q "^${VAR}=" "$file"; then
+              awk -v var="$VAR" -v tag="$TAG" \
+                '{ if ($0 ~ "^" var "=") print var "=" tag; else print }' \
+                "$file" > "${file}.new"
+            else
+              cat "$file" > "${file}.new"
+              printf '%s=%s\n' "$VAR" "$TAG" >> "${file}.new"
+            fi
+            mv "${file}.new" "$file"
+            git add "$file"
 
             if git diff --cached --quiet; then
-              echo "versions.env ya apunta a ${TAG}; nada que hacer."
+              echo "${VAR} ya apunta a ${TAG}; nada que hacer."
               exit 0
             fi
 
-            git commit --quiet -m "deploy(${APP}): ${TAG}" \
-              -m "Origen: ${SRC_REPO}@${TAG}"
+            git commit --quiet -m "deploy(${APP}): ${VAR}=${TAG}" \
+              -m "Origen: ${SRC_REPO}@${GITHUB_REF_NAME}"
 
             if git push --quiet origin "HEAD:${branch}"; then
-              echo "✅ ${APP} -> ${TAG} publicado en ${INFRA_REPO}"
+              echo "✅ ${APP}: ${VAR}=${TAG} publicado en ${INFRA_REPO}"
               exit 0
             fi
 
