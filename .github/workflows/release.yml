@@ -63,6 +63,16 @@ on:
         required: false
         type: string
         default: avesperinas/infra
+      news_paths:
+        description: >-
+          Rutas, separadas por espacios, que cuentan como novedades de este tren.
+          Las novedades son los títulos feat/fix desde el tag anterior del mismo
+          tren y viajan en el commit de infra, de donde las lee el aviso del
+          reconciliador. Vacío, cuentan todos los commits. Un repo con varios
+          trenes le da a cada uno lo que entra en su imagen.
+        required: false
+        type: string
+        default: ''
     secrets:
       infra_token:
         description: PAT fine-grained con Contents:read/write sobre infra
@@ -160,6 +170,48 @@ jobs:
           # Necesitamos historia para poder rebasar ante un push concurrente.
           fetch-depth: 0
 
+      # El repo de la app, con historia y tags, solo para leer qué cambió.
+      - uses: actions/checkout@v4
+        with:
+          path: src
+          fetch-depth: 0
+
+      # Sin novedades se despliega igual: quedarse sin resumen es malo, pero dejar una
+      # versión sin anunciar por no poder resumirla es peor.
+      - name: Resumir las novedades
+        continue-on-error: true
+        env:
+          NEWS_PATHS: ${{ inputs.news_paths }}
+        run: |
+          set -euo pipefail
+          cd src
+          : > "$RUNNER_TEMP/news.md"
+
+          # El tag anterior del mismo tren: `redin/v*` para `redin/v1.2.0` y `v*` para
+          # `v1.2.0`, que no casa con los de componente porque empiezan por su nombre.
+          case "$GITHUB_REF_NAME" in
+            */*) pattern="${GITHUB_REF_NAME%/*}/v[0-9]*" ;;
+            *)   pattern="v[0-9]*" ;;
+          esac
+          if ! prev=$(git describe --tags --abbrev=0 --match "$pattern" HEAD^ 2>/dev/null); then
+            echo "Primera versión del tren: sin novedades."
+            exit 0
+          fi
+
+          # `read -a` parte por espacios sin expandir comodines.
+          read -ra paths <<< "$NEWS_PATHS"
+          git log --no-merges --format=%s "${prev}..HEAD" -- "${paths[@]}" \
+            | sed -nE 's/^(feat|fix)(\([^)]*\))?!?: +//p' > "$RUNNER_TEMP/news.all"
+
+          max=8
+          total=$(wc -l < "$RUNNER_TEMP/news.all")
+          head -n "$max" "$RUNNER_TEMP/news.all" | sed 's/^/- /' > "$RUNNER_TEMP/news.md"
+          if [ "$total" -gt "$max" ]; then
+            echo "- y $((total - max)) más" >> "$RUNNER_TEMP/news.md"
+          fi
+          echo "Novedades desde ${prev}:"
+          cat "$RUNNER_TEMP/news.md"
+
       - name: Publicar la versión en infra
         env:
           APP: ${{ inputs.app_name }}
@@ -209,8 +261,17 @@ jobs:
               exit 0
             fi
 
-            git commit --quiet -m "deploy(${APP}): ${VAR}=${TAG}" \
-              -m "Origen: ${SRC_REPO}@${GITHUB_REF_NAME}"
+            {
+              echo "deploy(${APP}): ${VAR}=${TAG}"
+              echo
+              echo "Origen: ${SRC_REPO}@${GITHUB_REF_NAME}"
+              if [ -s "$RUNNER_TEMP/news.md" ]; then
+                echo
+                echo "Novedades:"
+                cat "$RUNNER_TEMP/news.md"
+              fi
+            } > "$RUNNER_TEMP/commit-msg"
+            git commit --quiet -F "$RUNNER_TEMP/commit-msg"
 
             if git push --quiet origin "HEAD:${branch}"; then
               echo "✅ ${APP}: ${VAR}=${TAG} publicado en ${INFRA_REPO}"

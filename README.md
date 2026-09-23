@@ -48,6 +48,14 @@ jobs:
 | `image_name` | no | nombre del repo | Nombre bajo `ghcr.io/avesperinas/` |
 | `bump_infra` | no | `true` | Si `false`, solo construye: no commitea en `infra` |
 | `infra_repo` | no | `avesperinas/infra` | Repo de estado desplegado |
+| `news_paths` | no | todo el repo | Rutas cuyos commits `feat`/`fix` son las novedades del tren |
+
+### Novedades
+
+El commit de despliegue lleva en el cuerpo los títulos `feat` y `fix` desde el tag
+anterior del mismo tren (`v*` para `vX.Y.Z`, `redin/v*` para `redin/vX.Y.Z`), sin el
+prefijo y con un máximo de ocho. El reconciliador de infra los manda por Telegram al
+desplegar. La primera versión de un tren no lleva novedades: no hay con qué comparar.
 
 ### Repos con más de una imagen
 
